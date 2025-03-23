@@ -1,8 +1,50 @@
 services:
-  app:
-    image: kokoro-wyoming
+  # TODO: This part may not quite work
+  kokoro-fastapi:
+    # image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.0
+    build:
+      context: https://github.com/remsky/Kokoro-FastAPI.git
+      dockerfile: docker/gpu/Dockerfile
+    container_name: kokoro-fastapi
+    restart: unless-stopped
+    volumes:
+      - ./Kokoro-FastAPI/api:/app/api
     ports:
-      - "10210:10210"
+      - "8880:8880"
+    environment:
+      - PYTHONPATH=/app:/app/api
+      - USE_GPU=true
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  kokoro-wyoming:
+    build: kokoro-wyoming
+    container_name: kokoro-wyoming
+    depends_on:
+      kokoro-fastapi:
+        condition: service_healthy
+    links:
+      - kokoro-fastapi
+#    volumes:
+#      - ./kokoro-wyoming/src/main.py:/app/src/main.py
+    ports:
+      - "10200:10200"
     restart: unless-stopped
     tty: true
     stdin_open: true
+    environment:
+      - API_HOST=http://kokoro-fastapi  # Set TTS service URL
+      - API_PORT=8880  # Set TTS service PORT
+      - DEBUG=True
