@@ -6,6 +6,3 @@ to achieve highly realistic speech synthesis, to the [Wyoming Protocol](https://
 
 Kokoro-FastAPI runs in its own container, and kokoro-wyoming runs in another container,  provides the Wyoming Protocol 
 wrapper around it. In theory, kokoro-wyoming could be easily extended to work with any TTS engine API.
-
-Things are not quite working yet; the request is made successfully and the stream starts and conveys audio from Kokoro 
-to HASS, but it turns to static after a few seconds of speech. So there is probably some issue with byte alignment.

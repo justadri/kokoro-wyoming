@@ -3,12 +3,12 @@ import argparse
 import asyncio
 import logging
 import os
+import sys
 import time
 from dataclasses import dataclass
 from functools import partial
 
 import aiohttp
-import numpy as np
 import requests
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
@@ -20,34 +20,6 @@ from wyoming.tts import Synthesize
 
 _LOGGER = logging.getLogger(__name__)
 VERSION = "0.2"
-
-
-# def split_into_sentences(text: str) -> list[str]:
-#     """
-#     Split text into sentences using punctuation boundaries.
-#
-#     Args:
-#         text: Input text to split
-#
-#     Returns:
-#         List of sentences
-#
-#     Example:
-#         >>> text = "Hello world! How are you? I'm doing great."
-#         >>> split_into_sentences(text)
-#         ['Hello world!', 'How are you?', "I'm doing great."]
-#     """
-#     # First normalize whitespace and clean the text
-#     text = ' '.join(text.strip().split())
-#
-#     # Split on sentence boundaries
-#     pattern = r'(?<=[.!?])\s+'
-#     sentences = re.split(pattern, text)
-#
-#     # Filter out empty strings and strip whitespace
-#     sentences = [s.strip() for s in sentences if s.strip()]
-#
-#     return sentences
 
 
 @dataclass
@@ -76,6 +48,7 @@ class KokoroEventHandler(AsyncEventHandler):
         self.chunk_size = 512
         self.speed = 1.0
         # self.normalization_options = args["normalization"]
+        _LOGGER.info("Event Handler initialized and awaiting events")
 
     async def handle_event(self, event: Event) -> bool:
         """Handle Wyoming protocol events."""
@@ -152,7 +125,7 @@ class KokoroEventHandler(AsyncEventHandler):
                                 _LOGGER.debug(
                                     f"Received first chunk after {first_chunk_time - start_time:.2f}s"
                                 )
-                                _LOGGER.debug(f"First chunk size: {len(chunk)} bytes")
+                                # _LOGGER.debug(f"First chunk size: {len(chunk)} bytes")
                                 audio_started = True
 
                                 _LOGGER.debug("Sending AudioStart")
@@ -164,30 +137,17 @@ class KokoroEventHandler(AsyncEventHandler):
                                     ).event()
                                 )
 
-                            # pad last chunk if necessary
-                            if len(chunk) < self.chunk_size:
-                                padding = self.chunk_size - len(chunk)
-                                chunk = chunk + b"\x00" * padding
-
-                            # Convert bytes to numpy array and play
-                            # audio_chunk = np.frombuffer(chunk, dtype=np.int16)
-                            # audio_bytes = audio_chunk.tobytes()
-
-                            # Convert float32 to int16
-                            audio_int16 = np.frombuffer((chunk * 32767), dtype=np.int16)
-                            audio_bytes = audio_int16.tobytes()
-
                             # Send audio chunk
                             await self.write_event(
                                 AudioChunk(
-                                    audio=audio_bytes,
+                                    audio=chunk,
                                     rate=self.sample_rate,
                                     width=self.sample_width,
                                     channels=self.channels,
                                 ).event()
                             )
 
-                            # Log progress every 10 chunks
+                            # Log progress every 100 chunks
                             if chunk_count % 100 == 0:
                                 elapsed = time.time() - start_time
                                 _LOGGER.debug(
@@ -220,11 +180,9 @@ class KokoroEventHandler(AsyncEventHandler):
 
 async def main():
     """Main entry point."""
-    kokoro_api_host = os.getenv("API_HOST", "http://heracles.dgtlu.net")
+    kokoro_api_host = os.getenv("API_HOST", "http://localhost")
     kokoro_api_port = os.getenv("API_PORT", "8880")
     kokoro_endpoint = f"{kokoro_api_host}:{kokoro_api_port}/v1/audio"
-
-    _LOGGER.debug(f"using {kokoro_endpoint} as endpoint")
 
     listen_host = os.getenv("LISTEN_HOST", "0.0.0.0")
     listen_port = os.getenv("LISTEN_PORT", 10200)
@@ -244,7 +202,7 @@ async def main():
     parser.add_argument(
         "--uri",
         default=f"{os.getenv('LISTEN_PROTOCOL', 'tcp')}://{listen_host}:{listen_port}",
-        help="unix:// or tcp://"
+        help="unix:// or tcp://[host]:[port]"
     )
     parser.add_argument(
         "--speed",
@@ -258,8 +216,8 @@ async def main():
     # )
     parser.add_argument(
         "--debug",
-        default=(os.getenv("DEBUG", "false").lower() == "true"),
-        action="store_true",
+        # default=(os.getenv("DEBUG", "false").lower() == "true"),
+        action="store_false",
         help="Enable debug logging",
     )
     args = parser.parse_args()
@@ -267,11 +225,17 @@ async def main():
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s: %(message)s",
+        stream=sys.stdout
     )
+
+    _LOGGER.debug(args)
+
+    _LOGGER.debug(f"using {kokoro_endpoint} as endpoint")
 
     # Get list of voices from Kokoro endpoint
     response = requests.get(f"{kokoro_endpoint}/voices")
     voice_names = response.json()["voices"]
+    # TODO: Parameterize custom voice blends
     voice_names.append("af_heart(2)+af_bella(1)+af_nicole(1)")
 
     # Define available voices
@@ -319,7 +283,6 @@ async def main():
 
     # Start server with kokoro instance
     await server.run(partial(KokoroEventHandler, wyoming_info, f"{kokoro_endpoint}/speech", args))
-
 
 if __name__ == "__main__":
     try:
